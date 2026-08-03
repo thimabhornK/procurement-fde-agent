@@ -1,7 +1,7 @@
 """
 Orchestrator เวอร์ชัน LangGraph
-ทำงานเหมือน orchestrator.py เดิมทุกอย่าง เปลี่ยนแค่วิธีจัดการการส่งต่องาน
-จาก Python ธรรมดา มาเป็น StateGraph ของ LangGraph
+ทำงานเหมือน orchestrator.py เดิม เปลี่ยนแค่วิธีจัดการการส่งต่องาน
+เป็น StateGraph ของ LangGraph และเพิ่มการ trace ทุก LLM call
 
 concept:
 - state คือ "กระดานไวท์บอร์ด" ที่ agent แต่ละตัวอ่านและเขียนเพิ่ม
@@ -15,6 +15,7 @@ from langgraph.graph import StateGraph, END
 
 from agents import document_agent, contract_agent, vendor_agent
 from data.sample_data import VENDOR_HISTORY
+from utils import tracing
 
 
 class AgentState(TypedDict):
@@ -26,8 +27,8 @@ class AgentState(TypedDict):
     final_summary: Optional[str]
 
 
-def build_graph(client, index, config):
-    """สร้างและคอมไพล์กราฟ ต้องส่ง client/index/config เข้ามาผูกไว้กับแต่ละ node"""
+def build_graph(client, index, config, tracer=None):
+    """สร้างและคอมไพล์กราฟ ส่ง tracer เข้ามาถ้าต้องการวัด latency/token/cost"""
 
     def retrieve_node(state: AgentState) -> dict:
         docs = document_agent.retrieve(client, index, state["query"], config, top_k=1)
@@ -35,14 +36,16 @@ def build_graph(client, index, config):
         return {"contract_text": contract["text"], "vendor_name": contract["vendor"]}
 
     def contract_node(state: AgentState) -> dict:
-        analysis = contract_agent.analyze_contract(client, state["contract_text"], config)
+        analysis = contract_agent.analyze_contract(
+            client, state["contract_text"], config, tracer=tracer
+        )
         return {"contract_analysis": analysis}
 
     def vendor_node(state: AgentState) -> dict:
         vendor_name = state["vendor_name"]
         if vendor_name in VENDOR_HISTORY:
             analysis = vendor_agent.score_vendor(
-                client, vendor_name, VENDOR_HISTORY[vendor_name], config
+                client, vendor_name, VENDOR_HISTORY[vendor_name], config, tracer=tracer
             )
         else:
             analysis = "ไม่มีข้อมูลประวัติผู้ขายรายนี้ในระบบ"
@@ -61,13 +64,11 @@ def build_graph(client, index, config):
 
 สรุปเป็นย่อหน้าสั้นๆ 3-4 ประโยค พร้อมคำแนะนำว่าควรอนุมัติหรือควรเจรจาต่อรองก่อน"""
 
-        response = client.models.generate_content(
-            model=config.GEMINI_MODEL,
-            contents=prompt,
+        response = tracing.generate(
+            client, config, contents=prompt, node_name="executive_summary", tracer=tracer
         )
         return {"final_summary": response.text}
 
-    # ประกอบกราฟ: บอกว่ามี node อะไรบ้าง แล้วต่อเส้นทางกันยังไง
     graph = StateGraph(AgentState)
     graph.add_node("retrieve", retrieve_node)
     graph.add_node("analyze_contract", contract_node)

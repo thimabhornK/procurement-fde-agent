@@ -3,8 +3,10 @@ Vendor scoring agent
 หน้าที่: ประเมินความเสี่ยงผู้ขายจากประวัติการทำงานร่วมกันที่ผ่านมา
 """
 
+from utils import tracing
 
-def score_vendor(client, vendor_name: str, vendor_data: dict, config) -> str:
+
+def score_vendor(client, vendor_name: str, vendor_data: dict, config, tracer=None) -> str:
     prompt = f"""คุณคือนักวิเคราะห์ความเสี่ยงผู้ขาย ประเมินผู้ขายรายนี้:
 
 ชื่อผู้ขาย: {vendor_name}
@@ -14,8 +16,7 @@ def score_vendor(client, vendor_name: str, vendor_data: dict, config) -> str:
 
 ให้คะแนนความเสี่ยง 1-10 (10 คือเสี่ยงสูงสุด) พร้อมเหตุผลสั้นๆ 2-3 ข้อ"""
 
-    response = client.models.generate_content(
-        model=config.GEMINI_MODEL,
-        contents=prompt,
+    response = tracing.generate(
+        client, config, contents=prompt, node_name="vendor_scoring", tracer=tracer
     )
     return response.text

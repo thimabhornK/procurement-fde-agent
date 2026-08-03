@@ -12,6 +12,7 @@ import config
 from agents import document_agent
 from data.sample_data import CONTRACTS
 from orchestrator_langgraph import build_graph
+from utils.tracing import Tracer
 
 
 def main():
@@ -25,7 +26,8 @@ def main():
     index = document_agent.build_index(client, CONTRACTS, config)
     print(f"สร้าง index สำเร็จ {len(index)} เอกสาร\n")
 
-    graph = build_graph(client, index, config)
+    tracer = Tracer()
+    graph = build_graph(client, index, config, tracer=tracer)
 
     query = "สัญญาคอมพิวเตอร์โน้ตบุ๊กมีความเสี่ยงอะไรบ้าง ควรอนุมัติไหม"
     print(f"คำถาม: {query}\n")
@@ -34,6 +36,8 @@ def main():
 
     print("=== สรุปผู้บริหาร ===")
     print(result["final_summary"])
+    print()
+    print(tracer.summary())
 
 
 if __name__ == "__main__":
