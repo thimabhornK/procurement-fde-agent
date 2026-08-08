@@ -1,8 +1,5 @@
 """
-Evaluation pipeline อย่างง่าย
-ทดสอบว่า agent จับเงื่อนไขเสี่ยงที่ "ควรจับได้" จริงหรือไม่ โดยเทียบกับคำตอบที่รู้ล่วงหน้า
-(เรียกว่า golden dataset) พร้อมพิมพ์ trace summary ของทั้งชุดทดสอบ
-
+Evaluation pipeline — เวอร์ชัน Chroma
 รันด้วยคำสั่ง: python3 evaluation.py
 """
 
@@ -15,7 +12,6 @@ from orchestrator_langgraph import build_graph
 from utils.tracing import Tracer
 
 
-# แต่ละเคสคือคำถาม + คำสำคัญที่ agent "ควรพูดถึง" ถ้าวิเคราะห์ถูกต้อง
 GOLDEN_DATASET = [
     {
         "query": "สัญญาคอมพิวเตอร์โน้ตบุ๊กมีความเสี่ยงอะไรบ้าง",
@@ -35,9 +31,12 @@ def run_evaluation():
         location=config.LOCATION,
     )
 
-    index = document_agent.build_index(client, CONTRACTS, config)
+    print("กำลังสร้าง Chroma index...")
+    collection = document_agent.build_index(client, CONTRACTS, config)
+    print(f"index พร้อมแล้ว {collection.count()} เอกสาร\n")
+
     tracer = Tracer()
-    graph = build_graph(client, index, config, tracer=tracer)
+    graph = build_graph(client, collection, config, tracer=tracer)
 
     passed = 0
     for case in GOLDEN_DATASET:

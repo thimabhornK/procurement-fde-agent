@@ -1,12 +1,6 @@
 """
-Orchestrator เวอร์ชัน LangGraph
-ทำงานเหมือน orchestrator.py เดิม เปลี่ยนแค่วิธีจัดการการส่งต่องาน
-เป็น StateGraph ของ LangGraph และเพิ่มการ trace ทุก LLM call
-
-concept:
-- state คือ "กระดานไวท์บอร์ด" ที่ agent แต่ละตัวอ่านและเขียนเพิ่ม
-- node คือ agent แต่ละตัว (ฟังก์ชันที่รับ state แล้วคืนค่าที่จะอัปเดตลงไป)
-- edge คือเส้นบอกว่า agent ไหนทำงานต่อจากไหน
+Orchestrator เวอร์ชัน LangGraph + Chroma
+อัปเดตให้รับ Chroma collection แทน in-memory index list
 """
 
 from typing import TypedDict, Optional
@@ -27,11 +21,11 @@ class AgentState(TypedDict):
     final_summary: Optional[str]
 
 
-def build_graph(client, index, config, tracer=None):
-    """สร้างและคอมไพล์กราฟ ส่ง tracer เข้ามาถ้าต้องการวัด latency/token/cost"""
+def build_graph(client, collection, config, tracer=None):
+    """รับ Chroma collection แทน index list"""
 
     def retrieve_node(state: AgentState) -> dict:
-        docs = document_agent.retrieve(client, index, state["query"], config, top_k=1)
+        docs = document_agent.retrieve(client, collection, state["query"], config, top_k=1)
         contract = docs[0]
         return {"contract_text": contract["text"], "vendor_name": contract["vendor"]}
 
