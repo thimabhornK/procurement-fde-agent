@@ -1,6 +1,6 @@
 # Procurement Intelligence Agent
 
-A production-grade multi-agent AI system that automates enterprise procurement workflows — from document ingestion to Thai-language executive summary generation. Built as a portfolio project targeting the **Forward Deployed Engineer (GenAI)** role at Google Cloud, covering all core and preferred qualifications in the job description.
+A production-grade multi-agent AI system that automates enterprise procurement workflows — from document ingestion to Thai-language executive summary generation. 
 
 ---
 
