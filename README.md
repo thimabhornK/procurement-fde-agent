@@ -159,7 +159,7 @@ python3 main_mcp.py
 - [x] Observability framework (latency, tokens, cost-per-request)
 - [x] Golden dataset evaluation pipeline
 - [x] MCP server with ERP tool integration
-- [ ] Streamlit frontend with real-time agent trace visualization
+- [x] Streamlit frontend with real-time agent trace visualization
 - [ ] LLM-as-judge evaluation (semantic accuracy scoring)
 - [ ] Parallel agent execution (contract + vendor agents run concurrently)
 
