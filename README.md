@@ -173,4 +173,4 @@ Vertex AI was rebranded to **Gemini Enterprise Agent Platform** at Google Cloud 
 
 ## Author
 
-Built by Thimabhorn K. as a hands-on preparation project for the Forward Deployed Engineer (GenAI), Google Cloud role — 2026
+Built by Thimabhorn K. — 2026
