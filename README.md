@@ -1,176 +1,152 @@
 # Procurement Intelligence Agent
 
-A production-grade multi-agent AI system that automates enterprise procurement workflows — from document ingestion to Thai-language executive summary generation. 
+A LangGraph workflow on Gemini that reviews a supply contract for terms that
+work against the buyer, scores the vendor from ERP history, and gives a
+procurement manager a short Thai summary with a recommendation: approve, or
+negotiate first. A second agent answers ERP questions (vendor master, budget,
+PO status) by Gemini function calling, and the same ERP tools are served over
+MCP.
 
----
+> All contracts, vendors and ERP records are synthetic, generated for this
+> project.
 
-## Business Problem
+## The problem
 
-Procurement teams face three recurring bottlenecks:
-- Manual contract review is slow and error-prone (missed auto-renewal clauses, unfavorable payment terms)
-- Vendor risk assessment relies on scattered spreadsheets with no systematic scoring
-- Executives need concise summaries, not raw data tables, to make approval decisions quickly
+Before a contract goes for approval, a buyer has to read it for terms that
+hurt the company (full prepayment, automatic renewal, a vendor's right to
+raise prices, a liability cap that is too low) and check the vendor's record.
+Managers then want two or three sentences and a clear recommendation, not the
+whole contract.
 
-This system automates all three using a coordinated multi-agent pipeline powered by Gemini on Google Cloud.
+## How it works
 
----
-
-## Architecture
-
-```
-User Query
-    ↓
-Orchestrator (LangGraph StateGraph)
-    ├── Document RAG Agent   → semantic search over contract corpus (Chroma Vector DB)
-    ├── Contract Risk Agent  → clause-level risk analysis with self-reflection loop
-    ├── Vendor Scoring Agent → risk scoring from historical ERP data
-    └── Executive Summary    → Thai-language summary with approval recommendation
-    ↓
-MCP Server (ERP Integration)
-    ├── get_vendor_info   → vendor status, credit limit, approved categories
-    ├── check_budget      → department budget remaining
-    └── get_po_status     → purchase order approval status
-```
-
----
-
-## File Structure
-
-```
-procurement-fde-agent/
-├── config.py                    Project, model, and cost config
-├── main.py                      Plain Python orchestrator (baseline)
-├── main_langgraph.py            LangGraph orchestrator (primary)
-├── main_mcp.py                  MCP ERP integration demo
-├── orchestrator.py              Plain Python multi-agent flow
-├── orchestrator_langgraph.py    LangGraph StateGraph flow
-├── evaluation.py                Golden dataset evaluation pipeline
-├── requirements.txt
-├── README.md
-│
-├── agents/
-│   ├── document_agent.py        RAG with Chroma vector DB
-│   ├── contract_agent.py        Contract risk analysis + self-reflection
-│   └── vendor_agent.py          Vendor risk scoring
-│
-├── data/
-│   └── sample_data.py           Mock contracts and vendor history
-│
-├── mcp/
-│   ├── erp_server.py            Mock ERP server (vendor, budget, PO tools)
-│   └── erp_agent.py             Agentic tool-use loop with Gemini
-│
-└── utils/
-    └── tracing.py               Latency, token, and cost-per-request tracker
+```mermaid
+flowchart LR
+  Q[Question] --> R[Retrieve contract<br/>Gemini embeddings + Chroma]
+  R --> C1[Contract review<br/>first pass]
+  C1 --> C2[Self-check pass]
+  C2 --> G[Grounding in code<br/>quote must be in the contract]
+  R --> V[Vendor score<br/>computed from ERP history]
+  G --> S[Executive summary<br/>approve / negotiate]
+  V --> S
 ```
 
----
+- **Fixed risk types, quoted clauses.** The model picks from eight defined
+  risk types (`procurement_agent/risks.py`) and must copy the clause it relied
+  on, word for word. Output is JSON with a schema, so it can be scored.
+- **Grounding in code.** Any risk whose quoted clause is not in the contract is
+  dropped before the summary sees it, and kept in the result for review.
+- **Self-check pass.** The model gets the contract and its first list again,
+  removes what the text does not support and adds what it missed. It costs one
+  more call; `--no-self-check` skips it and the evaluation measures both.
+- **The vendor score is code, not a prompt.** Late-delivery rate, quality
+  claims, tenure and status give a 1 to 10 score with the reasons attached, so
+  the same history always gets the same score.
+- **Parallel branches.** The contract review and the vendor score run side by
+  side after retrieval; the summary waits for both.
+- **Tracing.** Every model call records latency, input and output tokens
+  (thinking tokens included, since they are billed as output) and estimated
+  cost. A run reports wall-clock time separately from the sum of node times.
 
-## Tech Stack
+ERP questions take a different path: Gemini chooses `get_vendor_info`,
+`check_budget` or `get_po_status` by native function calling, code runs the
+tool, and Gemini words the answer from the tool result only.
+`python -m procurement_agent.erp.mcp_server` serves the same three tools to
+any MCP client.
 
-| Layer | Technology |
-|---|---|
-| LLM | Gemini 2.5 Flash via Gemini Enterprise Agent Platform (formerly Vertex AI) |
-| Agent Framework | LangGraph StateGraph |
-| Vector Database | Chroma (persistent, disk-backed) |
-| Embedding Model | text-embedding-005 |
-| MCP Integration | Custom MCP server simulating SAP/Oracle ERP |
-| Observability | Custom Tracer (latency, tokens/sec, cost-per-request per node) |
-| Evaluation | Golden dataset with keyword-based accuracy benchmarking |
-| Language | Python 3.13 |
+## Run it
 
----
+Requires Python 3.11 or newer.
 
-## Agentic Patterns Implemented
-
-- **Hierarchical delegation** — Orchestrator assigns tasks to specialized sub-agents
-- **Self-reflection** — Contract agent runs two-pass analysis: initial review → self-critique → final output
-- **Agentic tool use (MCP)** — Gemini decides which ERP tool to call based on user intent, without hardcoded routing
-- **RAG pipeline** — Semantic retrieval from Chroma vector DB using Gemini embeddings
-
----
-
-## Observability Results (from live run)
-
-| Node | Latency | Tokens In | Tokens Out | Est. Cost |
-|---|---|---|---|---|
-| contract_first_pass | 11.8s | 173 | 126 | $0.000051 |
-| contract_reflection | 20.7s | 195 | 830 | $0.000264 |
-| vendor_scoring | 8.5s | 112 | 178 | $0.000062 |
-| executive_summary | 12.5s | 1,115 | 265 | $0.000163 |
-| **Total (1 query)** | **53.4s** | | | **~$0.00054** |
-
-Cost at scale: ~$0.00054 per query → ~$16/month at 1,000 queries/day
-
----
-
-## How to Run
-
-**1. Install dependencies**
 ```bash
-python3 -m pip install -r requirements.txt
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev,app]"
+
+# Gemini API key, or Vertex AI (see below)
+export GEMINI_API_KEY=your-key
+
+python -m procurement_agent "สัญญาคอมพิวเตอร์โน้ตบุ๊กมีความเสี่ยงอะไรบ้าง ควรอนุมัติไหม" --trace
+python -m procurement_agent.erp "ฝ่ายไอทีมีงบประมาณเหลืออีกเท่าไหร่"
+streamlit run app.py
 ```
 
-**2. Authenticate with Google Cloud (one-time)**
+For Vertex AI instead of an API key:
+
 ```bash
 gcloud auth application-default login
+export GOOGLE_CLOUD_PROJECT=your-project-id
+export GOOGLE_CLOUD_LOCATION=us-central1   # optional
 ```
 
-**3. Update project ID in config.py if needed**
-```python
-PROJECT_ID = "procurement-fde-agent"
-```
+| Variable | Default | |
+| --- | --- | --- |
+| `PROCUREMENT_AGENT_MODEL` | `gemini-2.5-flash` | any Gemini model |
+| `PROCUREMENT_AGENT_EMBEDDING_MODEL` | `gemini-embedding-001` | |
+| `PROCUREMENT_AGENT_THINKING_BUDGET` | `0` on Gemini 2.5 Flash, model default otherwise | empty string = model default |
 
-**4. Run the multi-agent pipeline**
+Tests use a scripted stand-in for Gemini and need no key:
+
 ```bash
-python3 main_langgraph.py
+pytest
 ```
 
-**5. Run evaluation pipeline**
+## Evaluation
+
 ```bash
-python3 evaluation.py
+python -m procurement_agent.evaluate --self-check both   # writes reports/eval.json
+python -m procurement_agent.evaluate --baseline-only     # no API key needed
 ```
 
-**6. Run MCP ERP integration demo**
-```bash
-python3 main_mcp.py
+Sixteen labelled contracts are used. The prompts, the risk definitions and a
+keyword baseline were written against the first ten (`C001` to `C010`). The
+other six (`H001` to `H006`) were written afterwards in different wording,
+such as "lessee" and "lessor" instead of buyer and seller, or durations
+spelled out in words, and are reported separately.
+
+The evaluation measures:
+
+- retrieval: the right contract ranked first, two phrasings per contract
+- risk detection: precision and recall of risk types against the labels
+- grounding: quoted clauses that were not in the contract and were dropped
+- recommendation: approve or negotiate against the expected decision, which
+  is "negotiate" when the contract has a labelled risk or the vendor scores 7
+  or more
+- ERP tool choice: the right tool and arguments, over eight questions
+- latency per question (wall clock), model calls, tokens and cost
+
+The keyword baseline shows why the held-out set matters:
+
+| Keyword baseline | Precision | Recall |
+| --- | --- | --- |
+| Contracts the rules were written for (10) | 78% | 100% |
+| Held-out contracts (6) | 14% | 12% |
+
+## Repository layout
+
+```
+procurement_agent/
+  graph.py            LangGraph workflow: retrieve, review and score in parallel, summarize
+  contract_agent.py   First pass, self-check pass, grounding
+  risks.py            Risk types, output schema, grounding, keyword baseline
+  vendor_score.py     Vendor risk score from ERP history
+  retrieval.py        Gemini embeddings in a Chroma collection
+  llm.py              The only module that calls Gemini (retries, timeouts, tracing)
+  tracing.py          Latency, tokens and cost per call
+  evaluate.py         Evaluation and report
+  sample_data.py      Synthetic contracts with labels, vendor history, ERP records
+  erp/                ERP tools, function-calling agent, MCP server
+app.py                Streamlit UI
+tests/                Unit and end-to-end tests with a scripted model
 ```
 
----
+## Limitations
 
-## Evaluation Results
-
-| Test Case | Expected Keywords | Result |
-|---|---|---|
-| Notebook contract risks | ล่วงหน้า, ต่ออายุ | In progress — improving keyword coverage |
-| Office supply contract risks | ค่าปรับ | ✅ Pass |
-
-**Known limitation:** Current evaluation uses exact keyword matching. Next improvement: semantic similarity scoring using an LLM-as-judge approach.
-
----
-
-## Roadmap
-
-- [x] Gemini API integration via Vertex AI / Agent Platform
-- [x] Multi-agent orchestration (plain Python)
-- [x] LangGraph StateGraph orchestration
-- [x] Self-reflection pattern in contract analysis
-- [x] Chroma vector DB with persistent storage
-- [x] Observability framework (latency, tokens, cost-per-request)
-- [x] Golden dataset evaluation pipeline
-- [x] MCP server with ERP tool integration
-- [x] Streamlit frontend with real-time agent trace visualization
-- [ ] LLM-as-judge evaluation (semantic accuracy scoring)
-- [ ] Parallel agent execution (contract + vendor agents run concurrently)
-
----
-
-## Note on Rebranding
-
-Vertex AI was rebranded to **Gemini Enterprise Agent Platform** at Google Cloud Next 2026. The codebase uses `vertexai=True` in the SDK, which remains fully functional under the new platform name.
-
----
-
-## Author
-
-Built by Thimabhorn K. — 2026
+- Sixteen short synthetic contracts in Thai, each with four or five clauses.
+  Real contracts are longer, arrive as PDFs and need a document parser and
+  clause splitting before this step.
+- The risk labels are one reviewer's reading of the definitions; some
+  categories (what counts as a "low" liability cap) are judgment calls.
+- Retrieval returns one contract per question. A question about several
+  contracts, or about none, is not handled.
+- The ERP tools read in-memory records. A real deployment would call the ERP
+  with a read-only account for the agent.
